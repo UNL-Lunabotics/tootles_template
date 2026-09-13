@@ -49,62 +49,22 @@ RUN --mount=type=cache,target=/var/cache/apt \
     libxv1 \
     libxtst6
 
-#################### PLATFORMIO ####################
-RUN pipx install platformio && pipx ensurepath
-
 #################### ROS PACKAGES ####################
-# Cache the downloads to speed up rebuilds
-RUN --mount=type=cache,target=/var/cache/apt \
-    --mount=type=cache,target=/var/lib/apt \
-    apt-get update && apt-get install -y --no-install-recommends \
-    # Robot control
-    ros-${ROS_DISTRO}-ros2-control \
-    ros-${ROS_DISTRO}-ros2-controllers \
-    ros-${ROS_DISTRO}-ros2-control-cmake \
-    ros-${ROS_DISTRO}-robot-state-publisher \
-    ros-${ROS_DISTRO}-xacro \
-    # Inputs
-    ros-${ROS_DISTRO}-joy \
-    ros-${ROS_DISTRO}-joy-linux \
-    ros-${ROS_DISTRO}-teleop-twist-joy \
-    ros-${ROS_DISTRO}-teleop-twist-keyboard \
-    # Networking
-    ros-${ROS_DISTRO}-rmw-zenoh-cpp \
-    ros-${ROS_DISTRO}-foxglove-bridge \
-    # GUIs + visualization
-    ros-${ROS_DISTRO}-rviz2 \
-    ros-${ROS_DISTRO}-joint-state-publisher-gui \
-    # Sensors
-    ros-${ROS_DISTRO}-realsense2-camera \
-    ros-${ROS_DISTRO}-realsense2-description \
-    ros-${ROS_DISTRO}-image-transport \
-    ros-${ROS_DISTRO}-image-transport-plugins \
-    ros-${ROS_DISTRO}-vision-msgs \
-    ros-${ROS_DISTRO}-depth-image-proc \
-    # Simulation
-    ros-${ROS_DISTRO}-ros-gz \
-    ros-${ROS_DISTRO}-gz-ros2-control \
-    ros-${ROS_DISTRO}-mujoco-ros2-control \
-    ros-${ROS_DISTRO}-mujoco-3d-lidar \
-    # Remove this one later
-    ros-${ROS_DISTRO}-mujoco-ros2-control-demos
+# The .dockerignore will only allow package.xml files to be copied over
+# This is important because otherwise the layer would need to be rebuilt every time the source code changes
+COPY --chown=ubuntu:ubuntu src/ /home/ubuntu/workspaces/tootles_template/src/
 
-#################### CTRE PHOENIX ####################
-RUN curl -s --compressed -o /usr/share/keyrings/ctr-pubkey.gpg "https://deb.ctr-electronics.com/ctr-pubkey.gpg" && \
-    curl -s --compressed -o /etc/apt/sources.list.d/ctr2026.list "https://deb.ctr-electronics.com/ctr2026.list" && \
-    sed -i "s/signed-by=/arch=$(dpkg --print-architecture) signed-by=/" /etc/apt/sources.list.d/ctr2026.list
-
-# Cache for faster rebuilds
+# Use rosdep to install dependencies instead of manually listing every single one
+# This does mean that the package.xml of every ros2 package needs to be maintained and updated
 RUN --mount=type=cache,target=/var/cache/apt \
     --mount=type=cache,target=/var/lib/apt \
     apt-get update && \
-    apt-get install -y --no-install-recommends phoenix6
-
-# Required for CTRE to build correctly with colcon
-RUN CTRE_LIB_PATH=$(dirname $(find /usr -name "libCTRE_Phoenix6.so" | head -n 1)) && \
-    echo "Found Phoenix6 at: $CTRE_LIB_PATH" && \
-    echo "$CTRE_LIB_PATH" > /etc/ld.so.conf.d/ctre.conf && \
-    ldconfig
+    rosdep update && \
+    rosdep install \
+      --from-paths /home/ubuntu/workspaces/tootles_template/src \
+      --ignore-src \
+      --rosdistro ${ROS_DISTRO} \
+      -y
 
 #################### VirtualGL ####################
 RUN wget -q -O- https://packagecloud.io/dcommander/virtualgl/gpgkey | \
@@ -112,8 +72,6 @@ RUN wget -q -O- https://packagecloud.io/dcommander/virtualgl/gpgkey | \
 RUN wget -O /etc/apt/sources.list.d/VirtualGL.list https://raw.githubusercontent.com/VirtualGL/repo/main/VirtualGL.list
 
 RUN apt-get update && apt-get install -y --no-install-recommends virtualgl
-
-RUN apt-get update && apt-get upgrade -y
 
 #################### USER SETUP ####################
 ARG USERNAME=ubuntu
@@ -137,13 +95,7 @@ RUN echo "source /opt/ros/${ROS_DISTRO}/setup.bash" \
 
 #################### USER ENV ####################
 USER $USERNAME
-WORKDIR /workspaces/tootles/
-
-RUN mkdir -p ~/.colcon && \
-    printf "build:\n  symlink-install: true\n  cmake-args: [\"-DPython3_EXECUTABLE=/usr/bin/python3\"]\n" \
-    > ~/.colcon/defaults.yaml
+WORKDIR /home/ubuntu/workspaces/tootles_template/
 
 RUN printf "\nsource /opt/ros/${ROS_DISTRO}/setup.bash\n" >> ~/.bashrc && \
-    printf "if [ -f /workspaces/tootles/install/setup.bash ]; then source /workspaces/tootles/install/setup.bash; fi\n" >> ~/.bashrc && \
-    printf "alias use_fastdds='export RMW_IMPLEMENTATION=rmw_fastrtps_cpp && echo \"[ROS 2] Middleware swapped to FastDDS\"'\n" >> ~/.bashrc && \
-    printf "alias use_zenoh='export RMW_IMPLEMENTATION=rmw_zenoh_cpp && echo \"[ROS 2] Middleware swapped to Zenoh\"'\n" >> ~/.bashrc
+    printf "source /home/ubuntu/workspaces/tootles_template/install/setup.bash\n" >> ~/.bashrc
